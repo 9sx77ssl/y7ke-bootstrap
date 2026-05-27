@@ -8,6 +8,19 @@ multiaddrs. It carries no application protocols (no
 `/y7ke/handshake`, no `/y7ke/msg`, no `/y7ke/sync`), holds no per-user
 state, and cannot decrypt traffic — it never sees Y7KE wire types.
 
+## v0.1.3+: circuit relay
+
+From v0.1.3 the bootstrap also acts as a libp2p
+[circuit-relay-v2](https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md)
+server. Y7KE clients stuck behind NAT or CGNAT can reserve a slot on
+the bootstrap and forward their encrypted traffic through it to peers
+they otherwise couldn't dial directly. The relay only shuttles
+ciphertext frames — Noise + ChaCha20-Poly1305 wrap every byte before
+it leaves the client, so the same stateless guarantee holds: the
+bootstrap still cannot decrypt anything and holds no per-user state.
+Same TCP port (`4101`), same identity key, no operator action beyond
+`systemctl restart y7ke-bootstrap` after upgrading.
+
 If the daemon crashes, restarts, or is destroyed, no user content is
 lost; clients re-bootstrap from the new instance (or a different one)
 the next time they come online.

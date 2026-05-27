@@ -17,7 +17,7 @@ use libp2p::{
     identify,
     identity::Keypair,
     kad::{self, store::MemoryStore},
-    ping,
+    ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     StreamProtocol, SwarmBuilder,
 };
@@ -47,6 +47,7 @@ struct BootBehaviour {
     kad: kad::Behaviour<MemoryStore>,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+    relay: relay::Behaviour,
 }
 
 impl BootBehaviour {
@@ -68,10 +69,25 @@ impl BootBehaviour {
                 .with_timeout(Duration::from_secs(10)),
         );
 
+        // Generous limits: this node is a public relay for NAT-bound peers.
+        let relay = relay::Behaviour::new(
+            peer_id,
+            relay::Config {
+                max_reservations: 1024,
+                max_circuits: 1024,
+                max_circuits_per_peer: 16,
+                reservation_duration: Duration::from_secs(3600),
+                max_circuit_duration: Duration::from_secs(3600),
+                max_circuit_bytes: 0,
+                ..Default::default()
+            },
+        );
+
         Self {
             kad,
             identify,
             ping,
+            relay,
         }
     }
 }
@@ -142,6 +158,21 @@ async fn main() -> Result<()> {
                         debug!(?ev, "kad event");
                     }
                     SwarmEvent::Behaviour(BootBehaviourEvent::Ping(_)) => {}
+                    SwarmEvent::Behaviour(BootBehaviourEvent::Relay(ev)) => match ev {
+                        relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
+                            info!(%src_peer_id, "relay: reservation accepted");
+                        }
+                        relay::Event::ReservationReqDenied { src_peer_id, .. } => {
+                            warn!(%src_peer_id, "relay: reservation denied");
+                        }
+                        relay::Event::CircuitReqAccepted { src_peer_id, dst_peer_id } => {
+                            info!(%src_peer_id, %dst_peer_id, "relay: circuit accepted");
+                        }
+                        relay::Event::CircuitClosed { .. } => {
+                            debug!(?ev, "relay: circuit closed");
+                        }
+                        _ => debug!(?ev, "relay event"),
+                    },
                     other => debug!(?other, "swarm event"),
                 }
             }
