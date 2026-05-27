@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Universal installer for y7ke-bootstrap on Ubuntu / Debian.
+# Six steps, nothing more:
+#   1. Download the latest release binary for the host architecture.
+#   2. Create the y7ke-bootstrap system user (no shell, no home).
+#   3. Place the binary at /usr/local/bin/y7ke-bootstrap.
+#   4. Install /etc/systemd/system/y7ke-bootstrap.service.
+#   5. Open TCP 4101 on any firewall that is *already* active.
+#   6. systemctl daemon-reload && enable --now, then print the PeerId.
+#
+# Re-running this script is safe: the binary is upgraded in place and
+# the identity key at /var/lib/y7ke-bootstrap/identity.key is preserved
+# so the PeerId remains stable.
+
+set -euo pipefail
+
+REPO="9sx77ssl/y7ke-bootstrap"
+BIN_NAME="y7ke-bootstrap"
+INSTALL_PATH="/usr/local/bin/${BIN_NAME}"
+SERVICE_PATH="/etc/systemd/system/${BIN_NAME}.service"
+DATA_DIR="/var/lib/${BIN_NAME}"
+LISTEN_PORT="4101"
+USER_NAME="y7ke-bootstrap"
+
+log()  { printf "\033[1;36m[y7ke-bootstrap]\033[0m %s\n" "$*"; }
+warn() { printf "\033[1;33m[y7ke-bootstrap]\033[0m %s\n" "$*"; }
+die()  { printf "\033[1;31m[y7ke-bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "this installer needs root (run with sudo)"
+
+# Detect architecture.
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)  ASSET="y7ke-bootstrap-linux-x86_64" ;;
+    aarch64) ASSET="y7ke-bootstrap-linux-aarch64" ;;
+    *)       die "unsupported architecture: $ARCH" ;;
+esac
+log "host: $(uname -sr), arch: $ARCH"
+
+# 1. Download the latest release binary.
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
+log "downloading ${URL}"
+if ! curl -fsSL -o "$TMP/$BIN_NAME" "$URL"; then
+    die "download failed — has v0.1.0+ been released yet?"
+fi
+chmod +x "$TMP/$BIN_NAME"
+
+# 2. Create the system user (idempotent).
+if ! id -u "$USER_NAME" >/dev/null 2>&1; then
+    log "creating user ${USER_NAME}"
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$USER_NAME"
+else
+    log "user ${USER_NAME} already exists"
+fi
+
+# 3. Place the binary.
+log "installing ${INSTALL_PATH}"
+install -m 0755 "$TMP/$BIN_NAME" "$INSTALL_PATH"
+
+# Data dir for the identity key.
+mkdir -p "$DATA_DIR"
+chown "$USER_NAME":"$USER_NAME" "$DATA_DIR"
+chmod 0750 "$DATA_DIR"
+
+# 4. Install the systemd unit.
+log "installing ${SERVICE_PATH}"
+cat >"$SERVICE_PATH" <<'SERVICE'
+[Unit]
+Description=Y7KE Kademlia DHT bootstrap node
+Documentation=https://github.com/9sx77ssl/y7ke-bootstrap
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=y7ke-bootstrap
+Group=y7ke-bootstrap
+ExecStart=/usr/local/bin/y7ke-bootstrap
+Restart=on-failure
+RestartSec=5s
+Environment=RUST_LOG=info,y7ke_bootstrap=info
+StandardOutput=journal
+StandardError=journal
+MemoryMax=256M
+LimitNOFILE=65535
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/y7ke-bootstrap
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+# 5. Firewall — only touch one that's already active. We don't install
+#    or enable a firewall; the host's owner decides their own policy.
+if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    log "ufw is active — allowing tcp/${LISTEN_PORT}"
+    ufw allow "${LISTEN_PORT}/tcp" >/dev/null
+elif systemctl is-active --quiet firewalld 2>/dev/null; then
+    log "firewalld is active — allowing tcp/${LISTEN_PORT}"
+    firewall-cmd --permanent --add-port="${LISTEN_PORT}/tcp" >/dev/null
+    firewall-cmd --reload >/dev/null
+elif command -v iptables >/dev/null && iptables -L INPUT -n 2>/dev/null | grep -qE "^DROP|^REJECT"; then
+    log "iptables has restrictive rules — appending ACCEPT for tcp/${LISTEN_PORT}"
+    iptables -I INPUT -p tcp --dport "${LISTEN_PORT}" -j ACCEPT
+    if command -v netfilter-persistent >/dev/null; then
+        netfilter-persistent save >/dev/null 2>&1 || true
+    fi
+else
+    warn "no active firewall detected — leaving the host untouched"
+fi
+
+# 6. Enable + start.
+log "reloading systemd"
+systemctl daemon-reload
+log "enabling and starting ${BIN_NAME}.service"
+systemctl enable --now "${BIN_NAME}.service"
+
+# Wait briefly for the service to log its PeerId.
+sleep 2
+
+PEER_ID=$(journalctl -u "${BIN_NAME}.service" --no-pager -n 50 \
+    | grep -oE 'PeerId: 12D3KooW[A-Za-z0-9]+' \
+    | tail -1 \
+    | awk '{print $2}' || true)
+
+if [[ -n "${PEER_ID:-}" ]]; then
+    log "PeerId: ${PEER_ID}"
+    log "Multiaddr: /dns4/$(hostname -f 2>/dev/null || hostname)/tcp/${LISTEN_PORT}/p2p/${PEER_ID}"
+else
+    warn "could not extract PeerId from journal yet — check 'journalctl -fu ${BIN_NAME}'"
+fi
+
+log "done. status: systemctl status ${BIN_NAME}"
+log "logs:  journalctl -fu ${BIN_NAME}"

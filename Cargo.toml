@@ -1,0 +1,42 @@
+[package]
+name        = "y7ke-bootstrap"
+version     = "0.1.0"
+description = "Stateless libp2p Kademlia DHT bootstrap node for Y7KE. No app traffic, no decryption — pure routing."
+edition     = "2021"
+license     = "MIT OR Apache-2.0"
+repository  = "https://github.com/9sx77ssl/y7ke-bootstrap"
+rust-version = "1.80"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[[bin]]
+name = "y7ke-bootstrap"
+path = "src/main.rs"
+
+[dependencies]
+libp2p = { version = "0.56", features = [
+    "tokio",
+    "tcp",
+    "noise",
+    "yamux",
+    "identify",
+    "ping",
+    "kad",
+    "dns",
+    "macros",
+] }
+tokio              = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "io-util"] }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap               = { version = "4", features = ["derive"] }
+anyhow             = "1"
+futures            = "0.3"
+rand               = "0.8"
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+panic         = "abort"
+strip         = true

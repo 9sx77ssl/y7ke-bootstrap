@@ -1,0 +1,42 @@
+[Unit]
+Description=Y7KE Kademlia DHT bootstrap node
+Documentation=https://github.com/9sx77ssl/y7ke-bootstrap
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=y7ke-bootstrap
+Group=y7ke-bootstrap
+ExecStart=/usr/local/bin/y7ke-bootstrap
+Restart=on-failure
+RestartSec=5s
+
+# Logging
+Environment=RUST_LOG=info,y7ke_bootstrap=info
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits — the daemon is intentionally light.
+MemoryMax=256M
+LimitNOFILE=65535
+
+# Sandboxing — keep the process out of other parts of the host.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/y7ke-bootstrap
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+# AmbientCapabilities is intentionally empty: TCP 4101 doesn't need root.
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
