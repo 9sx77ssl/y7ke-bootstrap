@@ -18,8 +18,20 @@ they otherwise couldn't dial directly. The relay only shuttles
 ciphertext frames — Noise + ChaCha20-Poly1305 wrap every byte before
 it leaves the client, so the same stateless guarantee holds: the
 bootstrap still cannot decrypt anything and holds no per-user state.
-Same TCP port (`4101`), same identity key, no operator action beyond
-`systemctl restart y7ke-bootstrap` after upgrading.
+Same TCP port (`4101`), same identity key.
+
+**v0.1.4 added required external-address config.** The relay
+reservation hand-back to clients lists the bootstrap's publicly
+reachable multiaddrs; with no addresses configured, libp2p clients
+reject the reservation with `NoAddressesInReservation`. Declare them
+with `--external-addr` (repeatable) or the
+`Y7KE_BOOTSTRAP_EXTERNAL_ADDR` env var (comma-separated):
+
+```ini
+# /etc/systemd/system/y7ke-bootstrap.service.d/external.conf
+[Service]
+Environment=Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/your-host.example/tcp/4101
+```
 
 If the daemon crashes, restarts, or is destroyed, no user content is
 lost; clients re-bootstrap from the new instance (or a different one)

@@ -19,7 +19,7 @@ use libp2p::{
     kad::{self, store::MemoryStore},
     ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
-    StreamProtocol, SwarmBuilder,
+    Multiaddr, StreamProtocol, SwarmBuilder,
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, info, warn};
@@ -40,6 +40,14 @@ struct Args {
     /// first run; reused on subsequent runs so the PeerId stays stable.
     #[arg(long, default_value = "/var/lib/y7ke-bootstrap/identity.key")]
     key_path: PathBuf,
+
+    /// Public-facing multiaddrs to advertise as external addresses.
+    /// Required for the circuit-relay-v2 server: the reservation
+    /// acknowledgement returns these to clients, and clients dial them
+    /// back as the relay endpoint. Repeat for multiple (dns4/ip4/ip6).
+    /// Also accepted via `Y7KE_BOOTSTRAP_EXTERNAL_ADDR` (comma-separated).
+    #[arg(long, value_name = "MULTIADDR")]
+    external_addr: Vec<Multiaddr>,
 }
 
 #[derive(NetworkBehaviour)]
@@ -128,6 +136,25 @@ async fn main() -> Result<()> {
     swarm
         .listen_on(format!("/ip6/::/tcp/{}", args.listen_port).parse()?)
         .context("listen ipv6")?;
+
+    let mut external_addrs = args.external_addr.clone();
+    if let Ok(env_val) = std::env::var("Y7KE_BOOTSTRAP_EXTERNAL_ADDR") {
+        for piece in env_val.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            match piece.parse::<Multiaddr>() {
+                Ok(addr) => external_addrs.push(addr),
+                Err(e) => {
+                    warn!(value = %piece, error = %e, "ignoring malformed Y7KE_BOOTSTRAP_EXTERNAL_ADDR entry")
+                }
+            }
+        }
+    }
+    for addr in &external_addrs {
+        info!(%addr, "advertising external address");
+        swarm.add_external_address(addr.clone());
+    }
+    if external_addrs.is_empty() {
+        warn!("no external addresses configured — circuit-relay reservations will be rejected by clients with NoAddressesInReservation");
+    }
 
     let mut term = signal(SignalKind::terminate()).context("install SIGTERM handler")?;
     let mut intr = signal(SignalKind::interrupt()).context("install SIGINT handler")?;
