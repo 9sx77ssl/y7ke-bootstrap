@@ -8,6 +8,12 @@ Wants=network-online.target
 Type=simple
 User=y7ke-bootstrap
 Group=y7ke-bootstrap
+# Best-effort self-update before every start. Prefix combo:
+#   - = exit code != 0 is non-fatal (GitHub outage doesn't block start)
+#   + = run as root (the daemon itself runs unprivileged below)
+# Identity at /var/lib/y7ke-bootstrap/identity.key is never touched,
+# so the bootstrap's PeerId stays stable across upgrades.
+ExecStartPre=-+/usr/local/bin/y7ke-bootstrap-update
 ExecStart=/usr/local/bin/y7ke-bootstrap
 Restart=on-failure
 RestartSec=5s
@@ -26,7 +32,10 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/y7ke-bootstrap
+# /usr/local/bin needs to be writable for the ExecStartPre self-update
+# script (running as root via the `+` prefix). The main daemon itself
+# runs unprivileged and never writes here at runtime.
+ReadWritePaths=/var/lib/y7ke-bootstrap /usr/local/bin
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

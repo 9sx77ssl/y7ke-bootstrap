@@ -36,6 +36,44 @@ Re-running upgrades the binary in place. The identity key at
 `/var/lib/y7ke-bootstrap/identity.key` is preserved, so the PeerId
 stays the same.
 
+## Live bootstrap nodes
+
+| name | multiaddr |
+|---|---|
+| `bootstrap1` (DE) | `/dns4/bootstrap1.y7v.lol/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo` |
+
+If the DNS record isn't pointing yet, fall back to the raw IP:
+`/ip4/89.35.130.67/tcp/4101/p2p/12D3KooWEVq9A1w4xk1paGxywwPNy4vz8D92wxE4XKBh8DpA8fSo`
+
+Y7KE clients (≥ v0.1.21) auto-discover this in
+`y7ke_net::DEFAULT_BOOTSTRAPS`; no client-side config needed.
+
+## Updates
+
+Two ways to update an already-installed node, both safe — the identity
+key at `/var/lib/y7ke-bootstrap/identity.key` is never touched, so the
+PeerId stays the same.
+
+**Auto-update on restart** (default since v0.1.1). The systemd unit
+calls `ExecStartPre=-+/usr/local/bin/y7ke-bootstrap-update` before every
+start. The `-` makes failures non-fatal (GitHub outage doesn't block
+the service from running); the `+` lets it run as root long enough to
+replace `/usr/local/bin/y7ke-bootstrap`. To pick up a new release:
+
+```bash
+sudo systemctl restart y7ke-bootstrap
+```
+
+**Manual re-run** of the installer also works — it's idempotent:
+
+```bash
+bash <(curl -sSL https://github.com/9sx77ssl/y7ke-bootstrap/raw/main/install.sh)
+```
+
+To skip the auto-update behaviour (e.g. on an air-gapped host),
+comment out the `ExecStartPre=` line in
+`/etc/systemd/system/y7ke-bootstrap.service` and run `daemon-reload`.
+
 ## Multi-node setups
 
 There is no clustering or shared state. To run more than one bootstrap

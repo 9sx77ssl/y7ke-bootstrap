@@ -59,6 +59,18 @@ fi
 log "installing ${INSTALL_PATH}"
 install -m 0755 "$TMP/$BIN_NAME" "$INSTALL_PATH"
 
+# 3b. Install the self-update helper alongside it. The systemd unit
+#     calls this via ExecStartPre on every restart (best-effort, fails
+#     silently). The identity key is never touched so the PeerId is
+#     stable across upgrades.
+log "installing ${INSTALL_PATH}-update"
+UPDATE_URL="https://github.com/${REPO}/raw/main/update.sh"
+if curl -fsSL -o "${INSTALL_PATH}-update" "$UPDATE_URL"; then
+    chmod 0755 "${INSTALL_PATH}-update"
+else
+    warn "update helper download failed — restart auto-update will be a no-op"
+fi
+
 # Data dir for the identity key.
 mkdir -p "$DATA_DIR"
 chown "$USER_NAME":"$USER_NAME" "$DATA_DIR"
@@ -77,6 +89,11 @@ Wants=network-online.target
 Type=simple
 User=y7ke-bootstrap
 Group=y7ke-bootstrap
+# `-+` = best-effort (non-fatal) AND run as root (the daemon itself
+# runs unprivileged as User=). Pulls the latest binary from GitHub
+# before every restart; identity at /var/lib/y7ke-bootstrap/identity.key
+# is never touched, so the PeerId stays stable across upgrades.
+ExecStartPre=-+/usr/local/bin/y7ke-bootstrap-update
 ExecStart=/usr/local/bin/y7ke-bootstrap
 Restart=on-failure
 RestartSec=5s
@@ -89,7 +106,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/y7ke-bootstrap
+# /usr/local/bin needs to be writable for the self-update step above.
+ReadWritePaths=/var/lib/y7ke-bootstrap /usr/local/bin
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
