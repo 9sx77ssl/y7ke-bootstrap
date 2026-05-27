@@ -141,19 +141,32 @@ else
     warn "no active firewall detected — leaving the host untouched"
 fi
 
-# 6. Enable + start.
+# 6. Enable + restart. `restart` not `start` so re-runs of this script
+#    actually swap in the freshly-downloaded binary instead of leaving
+#    the old process running in memory.
 log "reloading systemd"
 systemctl daemon-reload
-log "enabling and starting ${BIN_NAME}.service"
-systemctl enable --now "${BIN_NAME}.service"
+INSTALL_TS=$(date +%s)
+log "enabling and (re)starting ${BIN_NAME}.service"
+systemctl enable "${BIN_NAME}.service" >/dev/null
+systemctl restart "${BIN_NAME}.service"
 
-# Wait briefly for the service to log its PeerId.
-sleep 2
-
-PEER_ID=$(journalctl -u "${BIN_NAME}.service" --no-pager -n 50 \
-    | grep -oE 'PeerId: 12D3KooW[A-Za-z0-9]+' \
-    | tail -1 \
-    | awk '{print $2}' || true)
+# Poll the journal for up to 15 s — on slow VPSes the systemd startup
+# can take a few seconds before the daemon prints its identity. Look
+# only at lines emitted since this install started so we don't pick up
+# a stale entry from a previous run.
+PEER_ID=""
+for _ in $(seq 1 15); do
+    sleep 1
+    PEER_ID=$(journalctl -u "${BIN_NAME}.service" \
+                --no-pager \
+                --since "@${INSTALL_TS}" \
+                --output=cat 2>/dev/null \
+              | grep -oE 'PeerId: 12D3KooW[A-Za-z0-9]+' \
+              | tail -1 \
+              | awk '{print $2}' || true)
+    [[ -n "$PEER_ID" ]] && break
+done
 
 if [[ -n "${PEER_ID:-}" ]]; then
     log "PeerId: ${PEER_ID}"
