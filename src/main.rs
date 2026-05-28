@@ -14,13 +14,14 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use futures::StreamExt;
 use libp2p::{
-    identify,
+    autonat, identify,
     identity::Keypair,
     kad::{self, store::MemoryStore},
     ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, StreamProtocol, SwarmBuilder,
 };
+use rand::rngs::OsRng;
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -56,6 +57,12 @@ struct BootBehaviour {
     identify: identify::Behaviour,
     ping: ping::Behaviour,
     relay: relay::Behaviour,
+    /// AutoNAT v2 server — answers `DialRequest` from clients by dialing
+    /// back over a fresh outbound socket. Pure responder, zero state
+    /// beyond per-connection RNG. Lets clients learn their public
+    /// reachability without us touching their traffic. See
+    /// `docs/V2_GLOBAL_NETWORKING_PLAN.md` §2 in the client repo.
+    autonat: autonat::v2::server::Behaviour<OsRng>,
 }
 
 impl BootBehaviour {
@@ -66,10 +73,16 @@ impl BootBehaviour {
         let mut kad = kad::Behaviour::with_config(peer_id, MemoryStore::new(peer_id), kad_cfg);
         kad.set_mode(Some(kad::Mode::Server));
 
+        // Identify push of listen-addr updates so clients dialing us
+        // learn about new transports (e.g. when QUIC comes online) and
+        // about other observed peers without waiting for the periodic
+        // tick. Cheap on the bootstrap side; load-bearing on the client
+        // side for DCUtR.
         let identify = identify::Behaviour::new(
             identify::Config::new(IDENTIFY_PROTOCOL.to_string(), kp.public())
                 .with_agent_version(IDENTIFY_AGENT.to_string())
-                .with_interval(Duration::from_secs(300)),
+                .with_interval(Duration::from_secs(300))
+                .with_push_listen_addr_updates(true),
         );
         let ping = ping::Behaviour::new(
             ping::Config::new()
@@ -91,11 +104,14 @@ impl BootBehaviour {
             },
         );
 
+        let autonat = autonat::v2::server::Behaviour::new(OsRng);
+
         Self {
             kad,
             identify,
             ping,
             relay,
+            autonat,
         }
     }
 }
@@ -123,6 +139,7 @@ async fn main() -> Result<()> {
             libp2p::yamux::Config::default,
         )
         .context("tcp/noise/yamux setup")?
+        .with_quic()
         .with_dns()
         .context("dns transport")?
         .with_behaviour(BootBehaviour::new)
@@ -132,10 +149,22 @@ async fn main() -> Result<()> {
 
     swarm
         .listen_on(format!("/ip4/0.0.0.0/tcp/{}", args.listen_port).parse()?)
-        .context("listen ipv4")?;
+        .context("listen ipv4 tcp")?;
     swarm
         .listen_on(format!("/ip6/::/tcp/{}", args.listen_port).parse()?)
-        .context("listen ipv6")?;
+        .context("listen ipv6 tcp")?;
+    // QUIC listens on the same port number but UDP, with the libp2p
+    // /quic-v1 suffix. AutoNAT v2 explicitly tests addresses with a
+    // fresh outbound socket, so the QUIC listener doesn't interfere with
+    // the relay TCP path — both serve their roles in parallel.
+    if let Err(e) =
+        swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", args.listen_port).parse()?)
+    {
+        warn!(error = %e, "listen ipv4 quic failed (best effort)");
+    }
+    if let Err(e) = swarm.listen_on(format!("/ip6/::/udp/{}/quic-v1", args.listen_port).parse()?) {
+        warn!(error = %e, "listen ipv6 quic failed (best effort)");
+    }
 
     let mut external_addrs = args.external_addr.clone();
     if let Ok(env_val) = std::env::var("Y7KE_BOOTSTRAP_EXTERNAL_ADDR") {
@@ -185,6 +214,9 @@ async fn main() -> Result<()> {
                         debug!(?ev, "kad event");
                     }
                     SwarmEvent::Behaviour(BootBehaviourEvent::Ping(_)) => {}
+                    SwarmEvent::Behaviour(BootBehaviourEvent::Autonat(ev)) => {
+                        debug!(?ev, "autonat server event");
+                    }
                     SwarmEvent::Behaviour(BootBehaviourEvent::Relay(ev)) => match ev {
                         relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
                             info!(%src_peer_id, "relay: reservation accepted");

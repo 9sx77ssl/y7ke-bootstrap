@@ -33,6 +33,28 @@ with `--external-addr` (repeatable) or the
 Environment=Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/your-host.example/tcp/4101
 ```
 
+## v0.1.5+: QUIC transport + AutoNAT v2 server
+
+From v0.1.5 the daemon listens on QUIC in addition to TCP — same
+port number but UDP, with the libp2p `/quic-v1` suffix. Clients that
+support QUIC (Y7KE ≥ v0.1.53) dial the bootstrap over QUIC first
+and fall back to TCP; the relay and AutoNAT paths work on either
+transport. Declare the QUIC external address alongside the TCP one:
+
+```ini
+# /etc/systemd/system/y7ke-bootstrap.service.d/external.conf
+[Service]
+Environment=Y7KE_BOOTSTRAP_EXTERNAL_ADDR=/dns4/your-host.example/tcp/4101,/dns4/your-host.example/udp/4101/quic-v1
+```
+
+The same release also runs an **AutoNAT v2 server** behaviour. Y7KE
+clients connect to the bootstrap and probe their own external
+reachability by asking the bootstrap to dial them back over a fresh
+outbound socket. Pure responder, no per-client state. The result
+flips a `NatReachability::{Public,Private,Unknown}` verdict in the
+client's UI and gates the upgrade-from-relay loop. No operator
+action required beyond the QUIC external-addr above.
+
 If the daemon crashes, restarts, or is destroyed, no user content is
 lost; clients re-bootstrap from the new instance (or a different one)
 the next time they come online.

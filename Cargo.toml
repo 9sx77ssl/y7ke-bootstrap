@@ -18,6 +18,7 @@ path = "src/main.rs"
 libp2p = { version = "0.56", features = [
     "tokio",
     "tcp",
+    "quic",
     "noise",
     "yamux",
     "identify",
@@ -26,6 +27,7 @@ libp2p = { version = "0.56", features = [
     "dns",
     "macros",
     "relay",
+    "autonat",
 ] }
 tokio              = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "io-util"] }
 tracing            = "0.1"
