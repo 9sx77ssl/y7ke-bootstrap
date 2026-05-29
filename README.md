@@ -55,6 +55,26 @@ flips a `NatReachability::{Public,Private,Unknown}` verdict in the
 client's UI and gates the upgrade-from-relay loop. No operator
 action required beyond the QUIC external-addr above.
 
+## v0.1.6+: transport-agnostic client descriptor
+
+On startup the daemon prints the **shorthand descriptor** the Y7KE
+client expects in its bootstrap list — a transport-AGNOSTIC address
+with no `/tcp` or `/udp`:
+
+```
+Y7KE bootstrap descriptor (paste into client): /dns4/your-host.example/4101/p2p/12D3KooW…
+```
+
+The client expands this one line into BOTH `/tcp/4101` and
+`/udp/4101/quic-v1` and races them — QUIC wins on UDP-open networks
+(the path that enables direct hole-punch), TCP is the fallback. One
+descriptor per unique host:port, derived from the configured external
+addresses (so the TCP and QUIC external-addrs of the same endpoint
+collapse to a single line). Operators copy this string straight into
+the client's Settings → bootstraps field; no transport bookkeeping
+on either side. The line is also emitted as a structured
+`client bootstrap descriptor` log record for journald.
+
 If the daemon crashes, restarts, or is destroyed, no user content is
 lost; clients re-bootstrap from the new instance (or a different one)
 the next time they come online.

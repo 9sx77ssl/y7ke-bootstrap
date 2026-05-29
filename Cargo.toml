@@ -1,6 +1,6 @@
 [package]
 name        = "y7ke-bootstrap"
-version     = "0.1.0"
+version     = "0.1.6"
 description = "Stateless libp2p Kademlia DHT bootstrap node for Y7KE. No app traffic, no decryption — pure routing."
 edition     = "2021"
 license     = "MIT OR Apache-2.0"

@@ -17,9 +17,10 @@ use libp2p::{
     autonat, identify,
     identity::Keypair,
     kad::{self, store::MemoryStore},
+    multiaddr::Protocol,
     ping, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
-    Multiaddr, StreamProtocol, SwarmBuilder,
+    Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
 };
 use rand::rngs::OsRng;
 use tokio::signal::unix::{signal, SignalKind};
@@ -185,6 +186,20 @@ async fn main() -> Result<()> {
         warn!("no external addresses configured — circuit-relay reservations will be rejected by clients with NoAddressesInReservation");
     }
 
+    // Print the transport-agnostic shorthand descriptor(s) the Y7KE client
+    // expects in its bootstrap list. One line per unique host:port — the
+    // client expands each into both /tcp and /udp/quic-v1 and races them,
+    // so the operator pastes ONE address and gets both transports.
+    let descriptors = shorthand_descriptors(&external_addrs, &peer_id);
+    if descriptors.is_empty() {
+        warn!("no shorthand descriptor derivable (external addrs lack host+port)");
+    } else {
+        for d in &descriptors {
+            println!("Y7KE bootstrap descriptor (paste into client): {d}");
+            info!(descriptor = %d, "client bootstrap descriptor");
+        }
+    }
+
     let mut term = signal(SignalKind::terminate()).context("install SIGTERM handler")?;
     let mut intr = signal(SignalKind::interrupt()).context("install SIGINT handler")?;
 
@@ -251,6 +266,37 @@ async fn main() -> Result<()> {
 /// Read the persistent Ed25519 keypair from `path`, generating one on
 /// first run. The file is written with mode 0600 so other system users
 /// can't read it.
+/// Collapse external multiaddrs into the transport-agnostic shorthand
+/// descriptors the Y7KE client expects: `/{net}/{host}/{port}/p2p/{peer}`
+/// (no /tcp or /udp). Each unique (net, host, port) yields one line — the
+/// /tcp and /udp/quic-v1 forms of the same endpoint dedup to a single
+/// descriptor, since the client re-expands it to both transports.
+fn shorthand_descriptors(external: &[Multiaddr], peer: &PeerId) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for addr in external {
+        let mut net_host: Option<(&'static str, String)> = None;
+        let mut port: Option<u16> = None;
+        for proto in addr.iter() {
+            match proto {
+                Protocol::Dns4(h) => net_host = Some(("dns4", h.to_string())),
+                Protocol::Dns6(h) => net_host = Some(("dns6", h.to_string())),
+                Protocol::Dns(h) => net_host = Some(("dns4", h.to_string())),
+                Protocol::Ip4(ip) => net_host = Some(("ip4", ip.to_string())),
+                Protocol::Ip6(ip) => net_host = Some(("ip6", ip.to_string())),
+                Protocol::Tcp(p) | Protocol::Udp(p) => port = Some(p),
+                _ => {}
+            }
+        }
+        if let (Some((net, host)), Some(p)) = (net_host, port) {
+            let d = format!("/{net}/{host}/{p}/p2p/{peer}");
+            if !out.contains(&d) {
+                out.push(d);
+            }
+        }
+    }
+    out
+}
+
 fn load_or_generate_keypair(path: &Path) -> Result<Keypair> {
     if path.exists() {
         let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
