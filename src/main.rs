@@ -286,7 +286,10 @@ fn shorthand_descriptors(external: &[Multiaddr], peer: &PeerId) -> Vec<String> {
             match proto {
                 Protocol::Dns4(h) => net_host = Some(("dns4", h.to_string())),
                 Protocol::Dns6(h) => net_host = Some(("dns6", h.to_string())),
-                Protocol::Dns(h) => net_host = Some(("dns4", h.to_string())),
+                // Preserve the family-agnostic /dns (A+AAAA) — collapsing it to
+                // /dns4 would strand IPv6 even with a published AAAA. The
+                // client's expand_bootstrap accepts /dns.
+                Protocol::Dns(h) => net_host = Some(("dns", h.to_string())),
                 Protocol::Ip4(ip) => net_host = Some(("ip4", ip.to_string())),
                 Protocol::Ip6(ip) => net_host = Some(("ip6", ip.to_string())),
                 Protocol::Tcp(p) | Protocol::Udp(p) => port = Some(p),

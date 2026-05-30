@@ -79,6 +79,29 @@ If the daemon crashes, restarts, or is destroyed, no user content is
 lost; clients re-bootstrap from the new instance (or a different one)
 the next time they come online.
 
+## v0.2.0+: IPv6 (best-effort) + UDP firewall
+
+The daemon binds IPv6 (`/ip6/::`) for TCP **and** QUIC, but **best-effort**:
+a v6-disabled host (or an EADDRINUSE dual-stack collision) only logs a warning
+and keeps serving IPv4 — it no longer crash-loops (fixed in v0.2.0). `install.sh`
+now opens **both TCP and UDP** on the port, IPv4 **and** IPv6 (QUIC rides UDP).
+
+To actually advertise IPv6 to clients (so two v6-capable peers connect directly
+over IPv6, bypassing NAT) the operator must, in addition:
+
+1. Publish an **`AAAA`** record for the host (none exists for `bootstrap1.y7v.lol`
+   yet — it's IPv4-only today).
+2. Open the **v6 firewall** for the port (the installer's `ip6tables` branch
+   does this on iptables hosts; ufw/firewalld cover v6 automatically).
+3. Add a v6 external-addr to `Y7KE_BOOTSTRAP_EXTERNAL_ADDR`, e.g.
+   `/dns6/your-host.example/tcp/4101,/dns6/your-host.example/udp/4101/quic-v1`
+   (or a single `/dns/...` which the daemon now emits as a family-agnostic
+   `/dns/...` client descriptor — A+AAAA).
+
+Until the AAAA + firewall + external-addr are in place, IPv6 is **inert** (the
+sockets bind but no peer learns a v6 address). This is an ops gap, not a code
+gap — the client and daemon code paths are IP-family-agnostic.
+
 ## One-line install (Ubuntu / Debian)
 
 ```bash
