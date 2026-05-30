@@ -163,11 +163,13 @@ runaway bug from eating the host.
 
 ## What this is *not*
 
-Not a relay, not a NAT-traversal helper, not an AutoNAT server, not a
-gossip pub-sub. Those are separate concerns and may ship as additional
-features in later Y7KE V2 tracks. This binary's surface stays
-intentionally minimal so the security review is trivial: it speaks
-identify + ping + kad and nothing else.
+It **cannot read your messages.** It runs Kademlia (server), circuit-relay-v2
+(server), and AutoNAT-v2 (server) on top of identify + ping — that's the whole
+surface. Crucially, it has **zero `y7ke-*` dependencies** and never sees a Y7KE
+wire type: relayed traffic is Noise- + ChaCha20-Poly1305-encrypted end-to-end
+*before* it reaches the circuit, so the relay forwards opaque bytes it can't
+decrypt. It is stateless (no message store, no accounts, no plaintext). It is
+NOT a gossip pub-sub, a directory, or anything that inspects application data.
 
 ## License
 

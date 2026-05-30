@@ -1,6 +1,12 @@
+# Independent workspace root. This repo is sometimes checked out NESTED inside
+# the y7ke client workspace; the empty table stops cargo from walking up and
+# claiming this crate as a member of that workspace. No effect on its own CI
+# (checked out standalone), where it is already the root.
+[workspace]
+
 [package]
 name        = "y7ke-bootstrap"
-version     = "0.1.6"
+version     = "0.2.0"
 description = "Stateless libp2p Kademlia DHT bootstrap node for Y7KE. No app traffic, no decryption — pure routing."
 edition     = "2021"
 license     = "MIT OR Apache-2.0"

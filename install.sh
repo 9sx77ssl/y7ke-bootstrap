@@ -5,7 +5,7 @@
 #   2. Create the y7ke-bootstrap system user (no shell, no home).
 #   3. Place the binary at /usr/local/bin/y7ke-bootstrap.
 #   4. Install /etc/systemd/system/y7ke-bootstrap.service.
-#   5. Open TCP 4101 on any firewall that is *already* active.
+#   5. Open TCP+UDP 4101 (IPv4+IPv6) on any firewall that is *already* active.
 #   6. systemctl daemon-reload && enable --now, then print the PeerId.
 #
 # Re-running this script is safe: the binary is upgraded in place and
@@ -125,15 +125,25 @@ SERVICE
 # 5. Firewall — only touch one that's already active. We don't install
 #    or enable a firewall; the host's owner decides their own policy.
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-    log "ufw is active — allowing tcp/${LISTEN_PORT}"
+    # TCP for the relay/Kad path AND UDP for QUIC (the hole-punch transport);
+    # ufw rules cover IPv4 + IPv6 by default.
+    log "ufw is active — allowing tcp+udp/${LISTEN_PORT}"
     ufw allow "${LISTEN_PORT}/tcp" >/dev/null
+    ufw allow "${LISTEN_PORT}/udp" >/dev/null
 elif systemctl is-active --quiet firewalld 2>/dev/null; then
-    log "firewalld is active — allowing tcp/${LISTEN_PORT}"
+    log "firewalld is active — allowing tcp+udp/${LISTEN_PORT}"
     firewall-cmd --permanent --add-port="${LISTEN_PORT}/tcp" >/dev/null
+    firewall-cmd --permanent --add-port="${LISTEN_PORT}/udp" >/dev/null
     firewall-cmd --reload >/dev/null
 elif command -v iptables >/dev/null && iptables -L INPUT -n 2>/dev/null | grep -qE "^DROP|^REJECT"; then
-    log "iptables has restrictive rules — appending ACCEPT for tcp/${LISTEN_PORT}"
+    log "iptables has restrictive rules — appending ACCEPT for tcp+udp/${LISTEN_PORT} (v4+v6)"
     iptables -I INPUT -p tcp --dport "${LISTEN_PORT}" -j ACCEPT
+    iptables -I INPUT -p udp --dport "${LISTEN_PORT}" -j ACCEPT
+    # Mirror onto IPv6 if ip6tables is present (best-effort; never fail install).
+    if command -v ip6tables >/dev/null; then
+        ip6tables -I INPUT -p tcp --dport "${LISTEN_PORT}" -j ACCEPT 2>/dev/null || true
+        ip6tables -I INPUT -p udp --dport "${LISTEN_PORT}" -j ACCEPT 2>/dev/null || true
+    fi
     if command -v netfilter-persistent >/dev/null; then
         netfilter-persistent save >/dev/null 2>&1 || true
     fi

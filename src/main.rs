@@ -148,12 +148,18 @@ async fn main() -> Result<()> {
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(600)))
         .build();
 
+    // v4 TCP stays mandatory — a node with no IPv4 TCP is useless.
     swarm
         .listen_on(format!("/ip4/0.0.0.0/tcp/{}", args.listen_port).parse()?)
         .context("listen ipv4 tcp")?;
-    swarm
-        .listen_on(format!("/ip6/::/tcp/{}", args.listen_port).parse()?)
-        .context("listen ipv6 tcp")?;
+    // v6 TCP is best-effort, matching the QUIC binds below. A v6-disabled
+    // kernel/container — or a dual-stack host where /ip6/:: collides
+    // (EADDRINUSE) with the v4-mapped socket — must NOT abort the daemon and
+    // crash-loop it (Restart=on-failure), taking v4 TCP + QUIC + relay +
+    // AutoNAT + Kad down with it.
+    if let Err(e) = swarm.listen_on(format!("/ip6/::/tcp/{}", args.listen_port).parse()?) {
+        warn!(error = %e, "listen ipv6 tcp failed (best effort; continuing on IPv4)");
+    }
     // QUIC listens on the same port number but UDP, with the libp2p
     // /quic-v1 suffix. AutoNAT v2 explicitly tests addresses with a
     // fresh outbound socket, so the QUIC listener doesn't interfere with
