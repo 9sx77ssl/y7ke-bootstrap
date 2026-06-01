@@ -5,6 +5,8 @@
 #   2. Create the y7ke-bootstrap system user (no shell, no home).
 #   3. Place the binary at /usr/local/bin/y7ke-bootstrap.
 #   4. Install /etc/systemd/system/y7ke-bootstrap.service.
+#   4b. If Y7KE_BOOTSTRAP_EXTERNAL_ADDR is set, write the external-addr systemd
+#       drop-in (REQUIRED for the relay server to accept reservations).
 #   5. Open TCP+UDP 4101 (IPv4+IPv6) on any firewall that is *already* active.
 #   6. systemctl daemon-reload && enable --now, then print the PeerId.
 #
@@ -122,6 +124,29 @@ CapabilityBoundingSet=
 WantedBy=multi-user.target
 SERVICE
 
+# 4b. External addresses — REQUIRED for the relay server. Without them the
+#     circuit-relay-v2 server acks reservations with an empty addr list and
+#     NAT'd clients fail with `NoAddressesInReservation`. Provide them by
+#     exporting Y7KE_BOOTSTRAP_EXTERNAL_ADDR before running this installer:
+#     comma-separated EXPLICIT multiaddrs (tcp AND udp/quic-v1, for this node's
+#     own public DNS and/or IP). We wire them via a systemd drop-in so the
+#     daemon picks them up on the (re)start below.
+DROPIN_DIR="${SERVICE_PATH}.d"
+if [[ -n "${Y7KE_BOOTSTRAP_EXTERNAL_ADDR:-}" ]]; then
+    log "writing external-addr drop-in (${DROPIN_DIR}/external-addr.conf)"
+    mkdir -p "$DROPIN_DIR"
+    cat >"${DROPIN_DIR}/external-addr.conf" <<DROPIN
+[Service]
+Environment=Y7KE_BOOTSTRAP_EXTERNAL_ADDR=${Y7KE_BOOTSTRAP_EXTERNAL_ADDR}
+DROPIN
+else
+    warn "Y7KE_BOOTSTRAP_EXTERNAL_ADDR not set — this node will run as a Kad +"
+    warn "AutoNAT server, but its RELAY will REJECT reservations (clients see"
+    warn "NoAddressesInReservation) until external addresses are declared. To"
+    warn "enable the relay, re-run with (note 'sudo -E' to pass the env):"
+    warn "  Y7KE_BOOTSTRAP_EXTERNAL_ADDR='/dns4/HOST/tcp/${LISTEN_PORT},/dns4/HOST/udp/${LISTEN_PORT}/quic-v1,/ip4/IP/tcp/${LISTEN_PORT},/ip4/IP/udp/${LISTEN_PORT}/quic-v1' sudo -E bash install.sh"
+fi
+
 # 5. Firewall — only touch one that's already active. We don't install
 #    or enable a firewall; the host's owner decides their own policy.
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
@@ -166,21 +191,27 @@ systemctl restart "${BIN_NAME}.service"
 # only at lines emitted since this install started so we don't pick up
 # a stale entry from a previous run.
 PEER_ID=""
+DESCRIPTOR=""
 for _ in $(seq 1 15); do
     sleep 1
-    PEER_ID=$(journalctl -u "${BIN_NAME}.service" \
-                --no-pager \
-                --since "@${INSTALL_TS}" \
-                --output=cat 2>/dev/null \
-              | grep -oE 'PeerId: 12D3KooW[A-Za-z0-9]+' \
-              | tail -1 \
-              | awk '{print $2}' || true)
+    JLOG=$(journalctl -u "${BIN_NAME}.service" --no-pager --since "@${INSTALL_TS}" --output=cat 2>/dev/null || true)
+    PEER_ID=$(printf '%s\n' "$JLOG" | grep -oE 'PeerId: 12D3KooW[A-Za-z0-9]+' | tail -1 | awk '{print $2}' || true)
+    # The daemon prints the exact transport-agnostic client descriptor once
+    # external addresses are configured. Grab it so the operator can paste it
+    # straight into the Y7KE client's Settings.
+    DESCRIPTOR=$(printf '%s\n' "$JLOG" | grep -oE 'descriptor \(paste into client\): \S+' | tail -1 | awk '{print $NF}' || true)
     [[ -n "$PEER_ID" ]] && break
 done
 
 if [[ -n "${PEER_ID:-}" ]]; then
     log "PeerId: ${PEER_ID}"
-    log "Multiaddr: /dns4/$(hostname -f 2>/dev/null || hostname)/tcp/${LISTEN_PORT}/p2p/${PEER_ID}"
+    if [[ -n "${DESCRIPTOR:-}" ]]; then
+        log "client bootstrap descriptor (paste into Y7KE Settings): ${DESCRIPTOR}"
+    else
+        warn "no client descriptor printed yet — this node is Kad/AutoNAT-only until"
+        warn "Y7KE_BOOTSTRAP_EXTERNAL_ADDR is set (see the warning above). Once set,"
+        warn "the descriptor appears in 'journalctl -u ${BIN_NAME}' as 'descriptor (paste into client): …'."
+    fi
 else
     warn "could not extract PeerId from journal yet — check 'journalctl -fu ${BIN_NAME}'"
 fi

@@ -120,8 +120,13 @@ RUST_LOG=info,y7ke_bootstrap=debug \
 
 - Host: `bootstrap1.y7v.lol` / `89.35.130.67`, port `4101` (TCP + UDP/QUIC).
 - `install.sh` → downloads the release binary, creates the unprivileged
-  `y7ke-bootstrap` user, installs the systemd unit, opens 4101, `enable --now`.
-  Idempotent; identity preserved.
+  `y7ke-bootstrap` user, installs the systemd unit, opens **tcp+udp** 4101
+  (ufw/firewalld/iptables), `enable --now`. Idempotent; identity preserved.
+  **For a relay-capable node, run it with the node's own external addresses:**
+  `Y7KE_BOOTSTRAP_EXTERNAL_ADDR='/dns4/HOST/tcp/4101,/dns4/HOST/udp/4101/quic-v1,/ip4/IP/tcp/4101,/ip4/IP/udp/4101/quic-v1' sudo -E bash install.sh`
+  — it writes the `external-addr.conf` systemd drop-in. Without it the node is
+  Kad/AutoNAT-only and the relay rejects reservations (`NoAddressesInReservation`);
+  install.sh warns loudly and prints the client descriptor from the journal once set.
 - systemd: `ExecStartPre=-+/usr/local/bin/y7ke-bootstrap-update` (best-effort
   self-update; `-` non-fatal, `+` as root) then the daemon as the unprivileged
   user, sandboxed (`ProtectSystem=strict`, no capabilities, `MemoryMax=256M`).
