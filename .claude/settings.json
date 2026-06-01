@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(cargo build*)",
+      "Bash(cargo check*)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo fmt*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"y7ke-bootstrap protocol (see CLAUDE.md). BEFORE coding: read CLAUDE.md + src/main.rs; verify in source, never invent. Keep the node STATELESS with zero y7ke-* deps; KAD /y7ke/kad/1.0.0 + identify /y7ke/0.1.0 must match the y7ke client. BEFORE finishing: review git diff, run fmt + clippy -D warnings + build, update CLAUDE.md/README if behaviour changed, commit locally. NEVER git push without an explicit request — releases are tag-driven.\"}}'",
+            "statusMessage": "Loading y7ke-bootstrap protocol"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -C \"${CLAUDE_PROJECT_DIR:-.}\" status --porcelain 2>/dev/null | grep -qE '(src/|Cargo\\.toml|\\.service|install\\.sh|update\\.sh)' && echo '{\"systemMessage\":\"y7ke-bootstrap: files changed — before finishing run cargo fmt + clippy -D warnings + build, update CLAUDE.md/README, and commit locally (never push without asking; releases are tag-driven).\"}' || true"
+          }
+        ]
+      }
+    ]
+  }
+}
